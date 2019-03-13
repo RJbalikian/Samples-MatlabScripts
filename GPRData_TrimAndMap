@@ -1,0 +1,63 @@
+clear;
+clc;
+
+%Read in file path. This could be automated more if desired
+Filepath = 'C:\Users\...\Documents';
+Filename = 'Filename.txt';
+FullFilepath = strcat(Filepath, Filename);
+fprintf('Reading %s\n', FullFilepath)
+
+%Read XYZ File into MATLab
+[TXTFilepath, TXTFilename, TXTExt] = fileparts(FullFilepath);
+TXTFileID = fopen(FullFilepath, 'r');
+TXTScan = textscan(TXTFileID,'%f%f%f%f', 'Delimiter', ',');
+TXTlength = length(TXTScan{1});
+Trim = mode(TXTScan{4}); %Determine what value will be trimmed
+
+%TXTlength and initialize iterators
+fprintf('%s has been loaded scanned.\n', Filename);
+fprintf('Trim value: %f\n', double(Trim));
+
+i = 1;
+j = i;
+k = 0;
+OutArraylength = 0;
+
+%Get length of file to initialize later matrix (helps save memory/time)
+while i <= TXTlength
+    if TXTScan{4}(i,1)~= Trim
+        OutArraylength = OutArraylength +1;
+    end
+    i = i+1;
+end
+OutArray = zeros(OutArraylength,4);
+fprintf('OutArray has been calculated to be %i rows long.\n', OutArraylength);
+
+%Creates array with all the data that will be exported into a new .txt file
+i = 1;
+disp('Creating array with output data...')
+while i<=TXTlength
+    if TXTScan{4}(i) == Trim
+        %Checks if value is the "NoValue" value. If so, nothing is output
+    else      
+        OutArray(j,1) = TXTScan{1}(i,1);
+        OutArray(j,2) = TXTScan{2}(i,1);
+        OutArray(j,3) = TXTScan{3}(i,1)/100;
+        OutArray(j,4) = TXTScan{4}(i,1);
+        j = j+1;
+    end
+    i = i+1;
+   
+    if (i/TXTlength)*100 > k
+        disp(round((i/TXTlength)*100) + "% Complete")
+        k = k + 10;
+    end
+end
+OutLength = length(OutArray);
+fclose('all');
+%Exports file to new .txt file
+FullFilepathOut = strcat(TXTFilepath,'\',TXTFilename,'_trim_depth',TXTExt);
+outputTable = array2table(OutArray,'VariableNames',{'x', 'y', 'z', 'radar'});
+disp('The output table has been created. Writing table to file now...')
+writetable(outputTable,FullFilepathOut);
+fprintf('The file %s_trim_depth%s has been created in %s.\n', TXTFilename, TXTExt, TXTFilepath)
