@@ -1,5 +1,5 @@
-# MatlabCodes
-Codes for Matlab, with geophysics applications
+# MatlabScripts
+Scripts for Matlab, with geophysics applications
 
 This repository contains MatLAB scripts with geophysics applications. 
 
