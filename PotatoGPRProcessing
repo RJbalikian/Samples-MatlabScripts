@@ -7,7 +7,10 @@
 velocity = 0.082; %velocity in m/ns
 
 %Read in file containing plant locations along profiles
-plantLocFile = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\potatoLocs.txt';
+
+directory = "[Insert directory here]" %My main directory not included in this version
+
+plantLocFile = strcat(directory, 'potatoLocs.txt');
 %formatSpec#           1  2  3   4     5    6    7  
 %formatSpec           ID Rw Plt Plnt xLoc yLoc zLoc
 plantLocFormatSpec = '%d %d %d   %d   %f   %f   %f';
@@ -15,7 +18,7 @@ plantLocFileID = fopen(plantLocFile);
 plantLocs = textscan(plantLocFileID, plantLocFormatSpec, 'HeaderLines', 1);
 
 %Read in file containing biomass data as collected in the field after harvest
-plantBiomassFile = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\BiomassData_adapted.txt';
+plantBiomassFile = strcat(directory, 'BiomassData_adapted.txt');
 %formatSpec#           1   2   3    4   5     6       7       8       9        10
 %formatSpec           ID  Rw  Plt Cult Plnt Biomass nSize1 nSize2  nSize3   TuberNum
 plantBiomFormatSpec = '%d %d  %d   %s   %d    %f     %d      %d      %d        %d';
@@ -24,7 +27,7 @@ plantBiomasses = textscan(plantBiomFileID, plantBiomFormatSpec, 'HeaderLines', 1
 %exportCell = plantBiomasses;
 
 %Read in file containing informatin for each Profile (i.e., length, depth, and frame coordinates)
-lineInfoFile = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\lineInfo.txt';
+lineInfoFile = strcat(directory, 'lineInfo.txt');
 %formatSpec#           1  2  3   4     5    6      7   8 
 %formatSpec           ID Rw Plt Line xLoc yStart yEnd depth
 lineInfoFormatSpec = '%d %d %d   %d   %f   %f     %f   %f';
@@ -35,8 +38,8 @@ lineInfo = textscan(lineInfoFileID, lineInfoFormatSpec,'HeaderLines', 1);
 profile = 3; %Profile 3 is the centerline profile
 
 %Set directories for input and output
-outputFilepath = strcat('C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\PlantOptimizer\Profile',string(profile),'\');
-imageFolder = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\ProcessedImages\Unclipped\';
+outputFilepath = strcat(directory, 'PlantOptimizeMethod\Profile',string(profile),'\');
+imageFolder = strcat(directory, 'ProcessedImages\Unclipped\');
 
 %Create array of thresholds to later iterate through
 minVal = 0;
