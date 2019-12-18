@@ -1,7 +1,12 @@
+%Matlab Code to process GPR data used to measure Potatos. 
+%Data originally collected in 3 profiles (#s 1, 3, & 5).
+%Plants were planted in 3 Rows, each containing 8 plots, each with 10 plants (for a total of 240 plants)
+%GPR profile is read in as grayscale image (values 0-255) and processing is done from there, using thresholds at each fifth value
 
-%Determine velocity of radar through medium and (thus) depth of each line
+%Assign velocity of radar through medium and (thus) depth of each line
 velocity = 0.082; %velocity in m/ns
 
+%Read in file containing plant locations along profiles
 plantLocFile = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\potatoLocs.txt';
 %formatSpec#           1  2  3   4     5    6    7  
 %formatSpec           ID Rw Plt Plnt xLoc yLoc zLoc
@@ -9,6 +14,7 @@ plantLocFormatSpec = '%d %d %d   %d   %f   %f   %f';
 plantLocFileID = fopen(plantLocFile);
 plantLocs = textscan(plantLocFileID, plantLocFormatSpec, 'HeaderLines', 1);
 
+%Read in file containing biomass data as collected in the field after harvest
 plantBiomassFile = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\BiomassData_adapted.txt';
 %formatSpec#           1   2   3    4   5     6       7       8       9        10
 %formatSpec           ID  Rw  Plt Cult Plnt Biomass nSize1 nSize2  nSize3   TuberNum
@@ -17,6 +23,7 @@ plantBiomFileID = fopen(plantBiomassFile);
 plantBiomasses = textscan(plantBiomFileID, plantBiomFormatSpec, 'HeaderLines', 1);
 %exportCell = plantBiomasses;
 
+%Read in file containing informatin for each Profile (i.e., length, depth, and frame coordinates)
 lineInfoFile = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\lineInfo.txt';
 %formatSpec#           1  2  3   4     5    6      7   8 
 %formatSpec           ID Rw Plt Line xLoc yStart yEnd depth
@@ -24,13 +31,14 @@ lineInfoFormatSpec = '%d %d %d   %d   %f   %f     %f   %f';
 lineInfoFileID = fopen(lineInfoFile);
 lineInfo = textscan(lineInfoFileID, lineInfoFormatSpec,'HeaderLines', 1);
 
-%Profile to work on
+%Profile to work on; only one is done at a time
 profile = 3; %Profile 3 is the centerline profile
 
+%Set directories for input and output
 outputFilepath = strcat('C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\PlantOptimizer\Profile',string(profile),'\');
 imageFolder = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\ProcessedImages\Unclipped\';
 
-%Iterate through each threshold
+%Create array of thresholds to later iterate through
 minVal = 0;
 incVal = 5;
 maxVal = 255;
@@ -321,3 +329,4 @@ writetable(outputRootPixels,strcat(outputFilepath,'rootPixels_AllPlants_AllThres
 writetable(outputRootAreas,strcat(outputFilepath,'rootAreas_AllPlants_AllThresholds.txt'));
 writetable(outputRootRatios,strcat(outputFilepath,'rootRatios_AllPlants_AllThresholds.txt'));
 
+fclose('all')
