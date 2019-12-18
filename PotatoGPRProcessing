@@ -1,0 +1,322 @@
+
+%Determine velocity of radar through medium and (thus) depth of each line
+velocity = 0.082; %velocity in m/ns
+
+plantLocFile = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\potatoLocs.txt';
+%formatSpec#           1  2  3   4     5    6    7  
+%formatSpec           ID Rw Plt Plnt xLoc yLoc zLoc
+plantLocFormatSpec = '%d %d %d   %d   %f   %f   %f';
+plantLocFileID = fopen(plantLocFile);
+plantLocs = textscan(plantLocFileID, plantLocFormatSpec, 'HeaderLines', 1);
+
+plantBiomassFile = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\BiomassData_adapted.txt';
+%formatSpec#           1   2   3    4   5     6       7       8       9        10
+%formatSpec           ID  Rw  Plt Cult Plnt Biomass nSize1 nSize2  nSize3   TuberNum
+plantBiomFormatSpec = '%d %d  %d   %s   %d    %f     %d      %d      %d        %d';
+plantBiomFileID = fopen(plantBiomassFile);
+plantBiomasses = textscan(plantBiomFileID, plantBiomFormatSpec, 'HeaderLines', 1);
+%exportCell = plantBiomasses;
+
+lineInfoFile = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\lineInfo.txt';
+%formatSpec#           1  2  3   4     5    6      7   8 
+%formatSpec           ID Rw Plt Line xLoc yStart yEnd depth
+lineInfoFormatSpec = '%d %d %d   %d   %f   %f     %f   %f';
+lineInfoFileID = fopen(lineInfoFile);
+lineInfo = textscan(lineInfoFileID, lineInfoFormatSpec,'HeaderLines', 1);
+
+outputFilepath = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\PlantOptimizer\Profile5\';
+imageFolder = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\ProcessedImages\Unclipped\';
+iterationTime(1,1:6) = 0;
+
+%Iterate through each threshold
+minVal = 0;
+incVal = 5;
+maxVal = 255;
+ThresholdArray = [minVal:incVal:maxVal];
+t = 1;
+thresholdStatistics = zeros(length(ThresholdArray),5);
+
+%Current row to work with
+rowIterator = 1;
+while rowIterator <= 3
+    %Plot to work on
+    plotIterator = 1;
+    while plotIterator <= 8
+        %Profile to work on
+        profile = 3; %Profile 3 is the centerline profile
+        lineID = ((rowIterator * 24)-24)+ ((plotIterator * 3)-3)+ (profile+1)/2;
+
+        %Plant to work on
+        plantIterator = 1;
+            while plantIterator <= 10
+
+                plantID = ((rowIterator * 80)-80)+ ((plotIterator * 10)-10) + plantIterator;
+                p = plantID;
+                disp(strcat('PlantID:',num2str(plantID)))
+                
+                plantID =   plantLocs{1}(p);
+                Row =      rowIterator;
+                Plot =      plotIterator;
+                Plant =     plantIterator;
+                xLoc_m =    plantLocs{5}(p);
+                yLoc_m =    plantLocs{6}(p);
+                zLoc_m =    plantLocs{7}(p);
+
+                lineLength_m = lineInfo{7}(lineID)-lineInfo{6}(lineID);
+                scanDepth_m = lineInfo{8}(lineID);
+                currentPlant =  sprintf('Row: %d Plot: %d Plant: %d\n', Row, Plot, Plant)
+                imageName = sprintf('R%dP%d_%d-regain', Row, Plot, profile);
+
+                    imageFilepath = strcat(imageFolder,imageName,'.bmp');
+                    [inputImage, testMap] = imread(imageFilepath);
+                    grayscaleImage = rgb2gray(inputImage);
+                    imageInfo = imfinfo(imageFilepath);
+                    %imageAxes = imtool(testImage,testMap);
+
+                    %Define Region of Interest, to be amended by next section, which finds exact region of interest
+                        ROIxMin = 100; %starting point
+                        ROIyMin = 390; %starting point
+                        ROIwidth = 852; %starting point
+                        ROIheight = 305; %starting point
+
+                    %Determine if chosen coordinates are at edge of image (if not, find it and change ROI start points)
+                        isXedge = 0;
+                        isYedge = 0;
+                        isInside = 0;
+                        while isXedge == 0 || isYedge==0 || isInside == 0
+
+                             tempValue = grayscaleImage(ROIyMin,ROIxMin);
+                             tempXValue = grayscaleImage(ROIyMin,ROIxMin-1);
+                             tempYValue = grayscaleImage(ROIyMin-1,ROIxMin);
+
+                             if tempValue(1) > 0 && tempValue(1) < 255
+                                isInside = 1;
+                             else 
+                                isInside = 0;
+                                ROIxMin = ROIxMin + 1;
+                                ROIyMin = ROIyMin + 1;
+                             end
+
+                             if tempXValue(1) == 0 || tempXValue(1) == 255
+                                isXedge = 1;
+                             else
+                                isXedge = 0;
+                                ROIxMin = ROIxMin - 1;
+                             end
+
+                             if tempYValue(1) == 0 || tempYValue(1) == 255
+                                isYedge = 1;
+                             else
+                                isYedge = 0;
+                                ROIyMin = ROIyMin - 1;
+                             end
+
+                        end
+
+                    %Determine size of ROI in pixels
+                        isXedge = 0;
+                        isYedge = 0;
+                        isInside = 0;
+                        while isXedge == 0 || isYedge==0 || isInside == 0
+
+                             tempValue = grayscaleImage(ROIyMin+ROIheight,ROIxMin+ROIwidth);
+                             tempXValue = grayscaleImage(ROIyMin+ROIheight,ROIxMin+ROIwidth+1);
+                             tempYValue = grayscaleImage(ROIyMin+ROIheight+1, ROIxMin+ROIwidth);
+
+                             if tempValue(1) > 0 && tempValue(1) < 255
+                                isInside = 1;
+                             else 
+                                isInside = 0;
+                                ROIwidth = ROIwidth - 1;
+                                ROIheight = ROIheight - 1;
+                             end
+
+                             if tempXValue(1) == 0 || tempXValue(1) == 255
+                                isXedge = 1;
+                             else
+                                isXedge = 0;
+                                ROIwidth = ROIwidth + 1;
+                             end
+
+                             if tempYValue(1) == 0 || tempYValue(1) == 255
+                                isYedge = 1;
+                             else
+                                isYedge = 0;
+                                ROIheight = ROIheight + 1;
+                             end
+
+                             status = [ROIyMin+ROIheight,ROIxMin+ROIwidth,isXedge,isYedge,isInside];
+
+                        end
+
+                    disp('Calculating size of pixels')
+                    %Calculate pixel width in meters
+                    pixelWidth(p,1) = lineLength_m/ROIwidth;
+
+                    %Calculate pixel height in meters
+                    pixelHeight(p,1) = scanDepth_m/ROIheight;
+
+                    %Calculate area of pixel in meters^2
+                    pixelArea(p,1) = pixelHeight(p,1) * pixelWidth(p,1);
+
+                    %Calculate location of plant in pixels
+                    loc_pix(p,1) = ceil(yLoc_m/pixelWidth(p,1));
+                    loc_pix(p,2) = ceil(zLoc_m/pixelHeight(p,1)); %this will always be 0
+
+                    %disp('Cropping image')
+                    %Crop image to ROI so only data is included in croppedImage (inital images have axes, etc.)
+                    croppedImage = zeros(ROIheight-1,ROIwidth-1);
+                    y = ROIyMin;
+                    while y < ROIheight+ROIyMin
+                       x = ROIxMin;
+                       while x < ROIwidth+ROIxMin
+                           croppedImage(y-ROIyMin+1,x-ROIxMin+1) = grayscaleImage(y,x);
+                           x = x+1;
+                       end
+                       y = y+1;
+                    end
+
+                    %Loop through each Threshold
+                    threshold = ThresholdArray(t);
+
+                    disp(strcat('Current Threshold: ', num2str(threshold)))
+
+                    %Read in plant locations
+                    searchRadius = 0.15; %in meters
+                    searchDepth  = 0.3; %in meters
+                    searchVol = (2*searchRadius)*(2*searchRadius)*searchDepth;
+                    searchArea = (2*searchRadius)*searchDepth;
+                    Ypixels_radius = ceil(searchRadius/pixelWidth(p,1));
+                    Zpixels_radius = ceil(searchDepth/pixelHeight(p,1));
+
+                    %disp('Finding potential root zone')
+                    %Assign Binary Values to rootZoneLogic variable using pixel value threshold created above
+                    rootZoneLogic = false(ROIheight,ROIwidth);
+                    i = 1;
+                    j = 1;
+                    k = 1;
+                    rootZone = zeros([1,2]);
+                    while i <= Zpixels_radius
+                        while j < ROIwidth
+                            if j <= loc_pix(p,1) + Ypixels_radius && j >= loc_pix(p,1) - Ypixels_radius
+                                rootZoneLogic(i,j) = 1;
+
+                                rootZone(k,1) = j; 
+                                rootZone(k,2) = i;
+
+                                k = k+1;
+                            end
+                            j = j+1;
+                        end
+                        j = 1;
+                        i = i+1;
+                    end
+
+                    %Find minimum and max of root zone area
+                    rootZoneYMin = min(rootZone(:,1));
+                    rootZoneYMax = max(rootZone(:,1));
+
+                    %disp('Calculating Root Binary Values')
+                    %disp('Currently on row: ')
+
+
+                    biomassRatio(p) = (plantBiomasses{6}(p)/(searchVol*1000000));
+
+
+                   thresh = 1;
+                   while thresh <= length(ThresholdArray)
+                       threshold = ThresholdArray(thresh);
+                       fprintf('Current Threshold: %i \nCurrent Plant: %s\n', threshold,currentPlant)
+
+                        rootPixels = zeros([1,2]);
+                        pY = rootZoneYMin;
+                        pZ = 1;
+                        r = 0;
+
+                        while pZ <= Zpixels_radius
+                            while pY <= rootZoneYMax
+
+                                currPixVal = croppedImage(pZ, pY);
+
+                                if rootZoneLogic(pZ,pY) && currPixVal(1) <= threshold
+                                        r = r+1;
+                                        rootPixels(r,1) = pY;
+                                        rootPixels(r,2) = pZ;
+                                end
+                                pY = pY+1;
+                            end
+                            %PixelRow_NumPixels = [pZ,r]
+
+                            pZ = pZ +1;
+                            pY = rootZoneYMin;
+                        end 
+
+                        %disp('Creating empty binary image') %Binary image to indicate root/not root
+                        binaryImage = zeros(size(croppedImage));
+
+
+                            %disp('Creating Root Binary Image') %Fill empty binary image with data
+                            i = 1;
+                            while i <= size(rootPixels,1)
+                                if rootPixels == [0,0]
+                                    disp('***No root pixels fit within this threshold***')
+                                else
+                                    binaryImage(rootPixels(i,2),rootPixels(i,1)) = 255;
+                                end
+                                i = i+1;
+                            end
+
+                            %Add pixel count and area
+                            if rootPixels == [0,0]
+                                plantThresh(thresh,p,1) = 0;
+                                plantThresh(thresh,p,2) = 0;
+                            else
+                                plantThresh(thresh,p,1) = size(rootPixels,1); %Number of pixels under threshold value
+                                plantThresh(thresh,p,2) = r*pixelArea(p,1)*10000; %Area of pixels under threshold value
+                            end
+                                plantThresh(thresh,p,3) = (plantThresh(thresh,p,2)/(searchArea*10000)); %Pixel ratio
+
+                           thresh = thresh + 1;
+                   end
+                   
+               [bestVal(p),bestThresh(p)] = min(abs(plantThresh(:,p,3)-biomassRatio(p)));
+               
+            %Prepare output data
+                exportCell{p,1} = plantBiomasses{1}(p); %ID
+                exportCell{p,2} = plantBiomasses{2}(p); %Row
+                exportCell{p,3} = plantBiomasses{3}(p); %Plot
+                exportCell{p,4} = plantBiomasses{4}(p); %Cult
+                exportCell{p,5} = plantBiomasses{5}(p); %Plant
+                exportCell{p,6} = plantBiomasses{6}(p); %Biomass of plant
+                exportCell{p,7} = plantThresh(bestThresh(p),p,1); %No of pixels
+                exportCell{p,8} = plantThresh(bestThresh(p),p,2); %Area of pixels
+                exportCell{p,9} = biomassRatio(p); %Biomass ratio
+                exportCell{p,10} = bestVal(p); %Best fit ratio (from root pixels)
+                exportCell{p,11} = bestThresh(p); %Best fit threshold for root pixels
+
+
+                fprintf('Best Threshold for plant %s is: %d\n', currentPlant,bestThresh(p))
+                fprintf('Min Distance: %0.3f\n',bestVal(p))   
+
+                plantIterator = plantIterator+1;
+            end
+        fclose('all');
+
+    plotIterator = plotIterator + 1;
+    end
+    
+ rowIterator = rowIterator + 1;
+end
+
+outputTable = cell2table(exportCell, 'VariableNames',{'ID', 'Row', 'Plot', 'Cult', 'Plant','Biomass_g','No_Pixels','Area_of_Pixels_cm2', 'Biomass_Ratio', 'Best_Fit_Ratio','Best_Fit_Thresh'});
+
+outputRootPixels = array2table(plantThresh(:,:,1));
+outputRootAreas = array2table(plantThresh(:,:,2));
+outputRootRatios = array2table(plantThresh(:,:,3));
+
+writetable(outputTable,strcat(outputFilepath,'DataAtPlantOptimizedThresholds.txt'));
+
+writetable(outputRootPixels,strcat(outputFilepath,'rootPixels_AllPlants_AllThresholds.txt'));
+writetable(outputRootAreas,strcat(outputFilepath,'rootAreas_AllPlants_AllThresholds.txt'));
+writetable(outputRootRatios,strcat(outputFilepath,'rootRatios_AllPlants_AllThresholds.txt'));
+
