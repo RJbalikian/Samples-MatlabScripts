@@ -24,9 +24,11 @@ lineInfoFormatSpec = '%d %d %d   %d   %f   %f     %f   %f';
 lineInfoFileID = fopen(lineInfoFile);
 lineInfo = textscan(lineInfoFileID, lineInfoFormatSpec,'HeaderLines', 1);
 
-outputFilepath = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\PlantOptimizer\Profile5\';
+%Profile to work on
+profile = 3; %Profile 3 is the centerline profile
+
+outputFilepath = strcat('C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\PlantOptimizer\Profile',string(profile),'\');
 imageFolder = 'C:\Users\balikian\LocalData\GPR_Local\Cassava\2019_Potatoes\MatlabProcessing\ProcessedImages\Unclipped\';
-iterationTime(1,1:6) = 0;
 
 %Iterate through each threshold
 minVal = 0;
@@ -42,8 +44,7 @@ while rowIterator <= 3
     %Plot to work on
     plotIterator = 1;
     while plotIterator <= 8
-        %Profile to work on
-        profile = 3; %Profile 3 is the centerline profile
+
         lineID = ((rowIterator * 24)-24)+ ((plotIterator * 3)-3)+ (profile+1)/2;
 
         %Plant to work on
