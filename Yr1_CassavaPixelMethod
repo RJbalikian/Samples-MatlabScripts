@@ -1,0 +1,769 @@
+clear %Clear Variables
+clc %Clear log
+
+velocity = 0.075; %Radar velocity through Medium in m/ns
+
+%Variable for directory with raw images
+imageFolder = [directory hidden];
+
+%Read in Plant Data File
+plantLocFile = '[directory hidden]\PlantLocs_XYZ.txt';
+%formatSpec (for my reference)123   4  5     6    7     8       9      10         11   12   13     14      15      16  
+%formatSpec           ID Ring Plt Grd Cult  Row  Plant PID ImageLineL ImageLineR xLoc yLoc zLoc LineLenL LineLenR RtWt 
+plantLocFormatSpec = '%d  %d  %q  %d   %q   %d    %d   %q      %d        %d       %f    %f   %f     %f      %f     %f ';
+plantLocFileID = fopen(plantLocFile); %open file and create file ID
+plantLocs = textscan(plantLocFileID, plantLocFormatSpec, 'HeaderLines', 1); %Read file into Cell Array plantLocs
+
+%Cell arrays have a nested format.
+%The {} are used to read from the top level cells
+%Often, each cell contains an entire array (or arrays) within it
+%Cell arrays used because it's easiest to read in and they are flexible
+
+%Create Output Directory to be used upon export
+outputFilepath = [directory hidden];
+
+%Create Search Dimensions for roots in the ground
+dimension = 0.3; % in meters
+searchRadius = dimension/2; %in meters
+searchDepth  = dimension; %in meters
+searchVol = (2*searchRadius)*(2*searchRadius)*searchDepth; %in meters^3
+searchArea = (2*searchRadius)*searchDepth; %in meters^2
+
+%Iterate through each value threshold for image: 0-255 in increments of 5
+minVal = 0;
+incVal = 5;
+maxVal = 255;
+ThresholdArray = [minVal:incVal:maxVal]; %Put values in array to be looped through later
+
+%Plant to work on (p = plant iterator)
+p = 1;
+while p <= length(plantLocs{1})
+    
+    %As we iterate thru each plant, a temp. var. is created for each col/parameter
+    plantID =   plantLocs{1}(p,1);
+    Ring =      plantLocs{2}(p,1);
+    Plot =      string(plantLocs{3}(p,1));
+    Grid =      plantLocs{4}(p,1);
+    Cult =      string(plantLocs{5}(p,1));
+    Row =       plantLocs{6}(p,1);
+    Plant =     plantLocs{7}(p,1);
+    PlantID =   string(plantLocs{8}(p,1));
+    ImageL =    plantLocs{9}(p,1);
+    ImageR =    plantLocs{10}(p,1);
+    xLoc_m =    plantLocs{11}(p,1);
+    yLoc_m =    plantLocs{12}(p,1);
+    zLoc_m =    plantLocs{13}(p,1);
+    lineLenL =  plantLocs{14}(p,1);
+    lineLenR =  plantLocs{15}(p,1);
+    rootFreshWt = plantLocs{16}(p,1);
+    
+    scanDepth_m = 1.485;%scan depth is an average determined by velocity, time window, and t0 cutoff
+    
+    if Cult == 'Blue' %Only run any of this if the plant is a "blue" cultivar plant
+        %Many of the variables here will and -L suffix, -R suffix, or -C  suffix
+        %L = Left image, R = right image, C = combined image
+        %This code is not as efficient as it could be, 
+        %   so it runs many of the process three times (one for each image at each plant)
+        
+        
+        if ImageL > 0 %Is there a left image for this plant? > 0 means there is. If so, read it in
+            imageFilepathL = strcat(imageFolder,'Unclipped\',num2str(Ring,'%02d'),Plot,'-Y',num2str(ImageL,'%02d'),'.bmp');
+            IL = true; %IL = Image Left
+            IC = true; %IC = Image Combined (we mark it true here for now)
+        else
+            IL = false;
+            IC = false;
+        end
+        
+        if ImageR > 0 %Is there right image? Read it in if so.
+            imageFilepathR = strcat(imageFolder,'Unclipped\',num2str(Ring,'%02d'),Plot,'-Y',num2str(ImageR,'%02d'),'.bmp');
+            IR = true;
+            if IC %Only if IR and IL are true (there is left image and right image), IC  = true
+                IC = true;
+            end
+        else
+            IR = false;
+            IC = false;
+        end
+        
+        
+            fprintf('Plot: %02d%s Row: %d Plant: %d\n', Ring, Plot, Row, Plant) %Output to track progress
+            currentPlant =  sprintf('Plot: %02d%s Row: %d Plant: %d', Ring, Plot, Row, Plant); %Previous version of this
+
+            %There is only detailed comments for left image processes
+            %The process for the right images and combined images are the same as the left image
+            
+            %Left image processes: Initial geometry
+            if IL %If there is a left image for this plant...
+                %convert to grayscale and read image info (not used)
+                [inputImageL, ~] = imread(imageFilepathL);
+                grayscaleImageL = rgb2gray(inputImageL);
+                imageInfoL = imfinfo(imageFilepathL);
+                
+                %Define Region of Interest (area of image that is data)                 
+                ROIxMinL = 277; %starting point
+                ROIyMinL = 292; %starting point
+                ROIwidthL = 600; %starting point
+                ROIheightL = 213; %starting point
+
+                %Determine if chosen coordinates are at edge of image (if not, find it and change ROI start points)                
+                isXedge = 0;
+                isYedge = 0;
+                isInside = 0;
+                while isXedge == 0 || isYedge==0 || isInside == 0
+
+                     tempValue = grayscaleImageL(ROIyMinL,ROIxMinL);
+                     tempXValue = grayscaleImageL(ROIyMinL,ROIxMinL-1);
+                     tempYValue = grayscaleImageL(ROIyMinL-1,ROIxMinL);
+
+                     if tempValue(1) > 0 && tempValue(1) < 255
+                        isInside = 1;
+                     else 
+                        isInside = 0;
+                        ROIxMinL = ROIxMinL + 1;
+                        ROIyMinL = ROIyMinL + 1;
+                     end
+
+                     if tempXValue(1) == 0 || tempXValue(1) == 255
+                        isXedge = 1;
+                     else
+                        isXedge = 0;
+                        ROIxMinL = ROIxMinL - 1;
+                     end
+
+                     if tempYValue(1) == 0 || tempYValue(1) == 255
+                        isYedge = 1;
+                     else
+                        isYedge = 0;
+                        ROIyMinL = ROIyMinL - 1;
+                     end
+
+                end  
+
+                %Determine size of ROI in pixels
+                isXedge = 0;
+                isYedge = 0;
+                isInside = 0;
+                while isXedge == 0 || isYedge==0 || isInside == 0
+
+                     tempValue = grayscaleImageL(ROIyMinL+ROIheightL,ROIxMinL+ROIwidthL);
+                     tempXValue = grayscaleImageL(ROIyMinL+ROIheightL,ROIxMinL+ROIwidthL+1);
+                     tempYValue = grayscaleImageL(ROIyMinL+ROIheightL+1, ROIxMinL+ROIwidthL);
+
+                     if tempValue(1) > 0 && tempValue(1) < 255
+                        isInside = 1;
+                     else 
+                        isInside = 0;
+                        ROIwidthL = ROIwidthL - 1;
+                        ROIheightL = ROIheightL - 1;
+                     end
+
+                     if tempXValue(1) == 0 || tempXValue(1) == 255
+                        isXedge = 1;
+                     else
+                        isXedge = 0;
+                        ROIwidthL = ROIwidthL + 1;
+                     end
+
+                     if tempYValue(1) == 0 || tempYValue(1) == 255
+                        isYedge = 1;
+                     else
+                        isYedge = 0;
+                        ROIheightL = ROIheightL + 1;
+                     end
+
+                end
+                
+                %Calculate the dimensions of each pixel in this image, in meters
+                pixelWidthL(p,1) = lineLenL/ROIwidthL;
+                pixelHeightL(p,1) = scanDepth_m/ROIheightL;
+                pixelAreaL(p,1) = pixelHeightL(p,1) * pixelWidthL(p,1);
+                
+                %Determine the location of the plant in pixels 
+                    %based on width of pixels and distance along line to plant
+                loc_pixL(p,1) = ceil(yLoc_m/pixelWidthL(p,1));
+                loc_pixL(p,2) = ceil(zLoc_m/pixelHeightL(p,1)); %this will always be 0
+
+                %Create Cropped image with only Region of Interest (data)
+                %Loops through each data pixel and reads value into "croppedImage" variable
+                y = ROIyMinL;
+                while y < ROIheightL+ROIyMinL
+                   x = ROIxMinL;
+                   while x < ROIwidthL+ROIxMinL
+                       croppedImageL(y-ROIyMinL+1,x-ROIxMinL+1) = uint8(grayscaleImageL(y,x));
+                       x = x+1;
+                   end
+                   y = y+1;
+                end 
+                %Search dimensions (in pixels instead of meters)
+                Ypixels_radiusL = ceil(searchRadius/pixelWidthL(p,1));
+                Zpixels_radiusL = ceil(searchDepth/pixelHeightL(p,1));
+                
+                %Initialize array of boolean vars that will be just be
+                %whether a particular pixel is 
+                %in the possible root zone (true) or not (false)
+                rootZoneLogicL = false(ROIheightL,ROIwidthL);
+                
+                %If a particular pixel from the croppedImage is in the root
+                %zone, set that area as true
+                i = 1;
+                j = 1;
+                k = 1;
+                rootZoneL = zeros([1,2]);
+                while i <= Zpixels_radiusL
+                    while j < ROIwidthL
+                        if j <= loc_pixL(p,1) + Ypixels_radiusL && j >= loc_pixL(p,1) - Ypixels_radiusL
+                            rootZoneLogicL(i,j) = 1;
+
+                            rootZoneL(k,1) = j; 
+                            rootZoneL(k,2) = i;
+
+                            k = k+1;
+                        end
+                        j = j+1;
+                    end
+                    j = 1;
+                    i = i+1;
+                end
+                
+                %Find minimum and maximum value in root zone (for shorthand later)
+                rootZoneYMinL = min(rootZoneL(:,1));
+                rootZoneYMaxL = max(rootZoneL(:,1));
+                if rootZoneYMinL == 0
+                   rootZoneYMinL = 1;
+                end                
+            end
+            
+            %Do all the same steps for right image, down to line 363
+            if IR
+                [inputImageR, ~] = imread(imageFilepathR);
+                grayscaleImageR = rgb2gray(inputImageR);
+            
+                imageInfoR = imfinfo(imageFilepathR);                
+                
+                ROIxMinR = 277; %starting point
+                ROIyMinR = 292; %starting point
+                ROIwidthR = 600; %starting point
+                ROIheightR = 213; %starting point            
+
+                %Determine if chosen coordinates are at edge of image (if not, find it and change ROI start points)
+                
+                isXedge = 0;
+                isYedge = 0;
+                isInside = 0;
+                while isXedge == 0 || isYedge==0 || isInside == 0
+
+                     tempValue = grayscaleImageR(ROIyMinR,ROIxMinR);
+                     tempXValue = grayscaleImageR(ROIyMinR,ROIxMinR-1);
+                     tempYValue = grayscaleImageR(ROIyMinR-1,ROIxMinR);
+
+                     if tempValue(1) > 0 && tempValue(1) < 255
+                        isInside = 1;
+                     else 
+                        isInside = 0;
+                        ROIxMinR = ROIxMinR + 1;
+                        ROIyMinR = ROIyMinR + 1;
+                     end
+
+                     if tempXValue(1) == 0 || tempXValue(1) == 255
+                        isXedge = 1;
+                     else
+                        isXedge = 0;
+                        ROIxMinR = ROIxMinR - 1;
+                     end
+
+                     if tempYValue(1) == 0 || tempYValue(1) == 255
+                        isYedge = 1;
+                     else
+                        isYedge = 0;
+                        ROIyMinR = ROIyMinR - 1;
+                     end
+
+                end
+                
+                %Determine size of ROI in pixels
+                isXedge = 0;
+                isYedge = 0;
+                isInside = 0;
+                while isXedge == 0 || isYedge==0 || isInside == 0
+
+                     tempValue = grayscaleImageR(ROIyMinR+ROIheightR,ROIxMinR+ROIwidthR);
+                     tempXValue = grayscaleImageR(ROIyMinR+ROIheightR,ROIxMinR+ROIwidthR+1);
+                     tempYValue = grayscaleImageR(ROIyMinR+ROIheightR+1, ROIxMinR+ROIwidthR);
+
+                     if tempValue(1) > 0 && tempValue(1) < 255
+                        isInside = 1;
+                     else 
+                        isInside = 0;
+                        ROIwidthR = ROIwidthR - 1;
+                        ROIheightR = ROIheightR - 1;
+                     end
+
+                     if tempXValue(1) == 0 || tempXValue(1) == 255
+                        isXedge = 1;
+                     else
+                        isXedge = 0;
+                        ROIwidthR = ROIwidthR + 1;
+                     end
+
+                     if tempYValue(1) == 0 || tempYValue(1) == 255
+                        isYedge = 1;
+                     else
+                        isYedge = 0;
+                        ROIheightR = ROIheightR + 1;
+                     end
+
+                end                
+
+                pixelWidthR(p,1) = lineLenR/ROIwidthR;
+                pixelHeightR(p,1) = scanDepth_m/ROIheightR;
+                pixelAreaR(p,1) = pixelHeightR(p,1) * pixelWidthR(p,1);
+                loc_pixR(p,1) = ceil(yLoc_m/pixelWidthR(p,1));
+                loc_pixR(p,2) = ceil(zLoc_m/pixelHeightR(p,1)); %this will always be 0    
+                
+                y = ROIyMinR;
+                while y < ROIheightR+ROIyMinR
+                   x = ROIxMinR;
+                   while x < ROIwidthR+ROIxMinR
+                       croppedImageR(y-ROIyMinR+1,x-ROIxMinR+1) = uint8(grayscaleImageR(y,x));
+                       x = x+1;
+                   end
+                   y = y+1;
+                end   
+                
+                Ypixels_radiusR = ceil(searchRadius/pixelWidthR(p,1));
+                Zpixels_radiusR = ceil(searchDepth/pixelHeightR(p,1));
+                rootZoneLogicR = false(ROIheightR,ROIwidthR);
+
+                i = 1;
+                j = 1;
+                k = 1;    
+                rootZoneR = zeros([1,2]);
+                while i <= Zpixels_radiusR
+                    while j < ROIwidthR
+                        if j <= loc_pixR(p,1) + Ypixels_radiusR && j >= loc_pixR(p,1) - Ypixels_radiusR
+                            rootZoneLogicR(i,j) = 1;
+
+                            rootZoneR(k,1) = j; 
+                            rootZoneR(k,2) = i;
+
+                            k = k+1;
+                        end
+                        j = j+1;
+                    end
+                    j = 1;
+                    i = i+1;
+                end     
+                
+                rootZoneYMinR = min(rootZoneR(:,1));
+                rootZoneYMaxR = max(rootZoneR(:,1));
+                if rootZoneYMinR == 0
+                   rootZoneYMinR = 1;
+                end
+                            
+            end
+            
+            %Do the same processing for combined Image, with a few extra
+            %steps to create the the image itself
+            %If difference between left and right image, left image is used
+            if IC
+                %Determine size of ROI in pixels (uses left image as template)               
+                ROIxMinC = ROIxMinL;
+                ROIyMinC = ROIyMinL;
+                ROIwidthC = ROIwidthL;
+                ROIheightC = ROIheightL;
+                
+                %Determine size of pixels and location of plant in pixels
+                pixelWidthC(p,1) = pixelWidthL(p,1);
+                pixelHeightC(p,1) = pixelHeightL(p,1);
+                pixelAreaC(p,1) = pixelAreaL(p,1);
+                loc_pixC(p,1) = ceil(loc_pixL(p,1)+loc_pixR(p,1)/2);
+                loc_pixC(p,2) = ceil(loc_pixL(p,2)+loc_pixR(p,2)/2);%this will always be 0
+
+                %Pixels in region of interest will be "stacked"
+                y = ROIyMinC;
+                while y < ROIheightC+ROIyMinC
+                   x = ROIxMinC;
+                   while x < ROIwidthL+ROIxMinL
+                       %Commented portion was first try. 
+                            %The non-commented portion gets the same result more efficiently
+                       %inverseL = uint8(255-(grayscaleImageL(y,x))) %Invert pixel vals from left image
+                       %inverseR = uint8(255-(grayscaleImageR(y,x))) %Invert pixel vals from right image
+                       %croppedImageC(y-ROIyMinL+1,x-ROIxMinL+1) = uint8(round(255 - ((single(inverseL) + single(inverseR))/2),0));
+                       croppedImageC(y-ROIyMinL+1,x-ROIxMinL+1) = uint8((grayscaleImageR(y,x)+grayscaleImageL(y,x))/2);
+                       x = x+1;
+                   end
+                   y = y+1;
+                end      
+                
+                %Same process as left image from here on out
+                Ypixels_radiusC = Ypixels_radiusL;
+                Zpixels_radiusC = Zpixels_radiusL;
+                rootZoneLogicC = false(ROIheightC,ROIwidthC);
+
+                i = 1;
+                j = 1;
+                k = 1;   
+                rootZoneC = zeros([1,2]);
+                while i <= Zpixels_radiusC
+                    while j < ROIwidthC
+                        if j <= loc_pixC(p,1) + Ypixels_radiusC && j >= loc_pixC(p,1) - Ypixels_radiusC
+                            rootZoneLogicC(i,j) = 1;
+
+                            rootZoneC(k,1) = j; 
+                            rootZoneC(k,2) = i;
+
+                            k = k+1;
+                        end
+                        j = j+1;
+                    end
+                    j = 1;
+                    i = i+1;
+                end       
+                
+                rootZoneYMinC = min(rootZoneC(:,1));
+                rootZoneYMaxC = max(rootZoneC(:,1));
+                if rootZoneYMinC == 0
+                   rootZoneYMinC = 1;
+                end                
+            end
+
+            %Get biomass ratio for current plant. Puts it in array with
+                %biomass ratios for all plants
+            biomassRatio(p) = (rootFreshWt/(searchVol*1000000));
+            
+            %Start iteration through each threshold, for current plant
+            thresh = 1;
+            while thresh <= length(ThresholdArray)
+                   threshold = ThresholdArray(thresh);
+                   
+                %For left image:
+                if IL
+                    %Initialize root pixel array with 0pixles
+                        %This array has one "row" per pixel, 2 cols
+                        %Each column is pixel coordinate of root pixel
+                    rootPixelsL = zeros([1,2]);
+
+                    %Iterate through each pixel in root zone
+                    pY = rootZoneYMinL;
+                    pZ = 1;
+                    rL = 0;
+                    while pZ <= Zpixels_radiusL
+                        while pY <= rootZoneYMaxL
+
+                            currPixVal = croppedImageL(pZ, pY);
+                            
+                            %If the current pixel is in the root zone, 
+                                %and its value is under the threshold, 
+                                %add it to the root pixel array
+                            if rootZoneLogicL(pZ,pY) && currPixVal(1) <= threshold
+                                    rL = rL+1;
+                                    rootPixelsL(rL,1) = pY;
+                                    rootPixelsL(rL,2) = pZ;
+                            end
+                            pY = pY+1;
+                        end
+
+                        pZ = pZ +1;
+                        pY = rootZoneYMinL;
+                    end                     
+                    
+                    %Create a pure black/white image the size of the data that will be
+                    %show where there's a root
+                    binaryImageL = uint8(zeros(size(croppedImageL)));
+                    
+                    %Iterate through each "row" in the root pixels array
+                        %Add all root pixels to binary image
+                    i = 1;
+                    while i <= size(rootPixelsL,1)
+                        if rootPixelsL == [0,0]
+                            %disp('***No root pixels fit within this threshold***')
+                        else
+                            binaryImageL(rootPixelsL(i,2),rootPixelsL(i,1)) = uint8(255);
+                        end
+                        i = i+1;
+                    end
+                    
+                    %Count the number and area of pixels at this plant and threshold
+                        %Read into 3D array containing number/area of pixels
+                        %for all plants and thresholds
+                    if rootPixelsL == [0,0]
+                        plantThreshL(thresh,p,1) = 0;%No of pixels
+                        plantThreshL(thresh,p,2) = 0;%Area of pixels
+                    else
+                        plantThreshL(thresh,p,1) = size(rootPixelsL,1); %No of pixels
+                        plantThreshL(thresh,p,2) = rL*pixelAreaL(p,1)*10000; %Area of pixels
+                    end
+                    %Add a third column for area ratio at current threshold for current plant
+                    plantThreshL(thresh,p,3) = (plantThreshL(thresh,p,2)/(searchArea*10000));
+                    
+                else
+                    %If no left image, just fill all spaces with 0 (null value)
+                    i = 1;
+                    while i <= 3
+                        plantThreshL(thresh,p,i) = 0;
+                        i=i+1;
+                    end                       
+                end
+                
+                
+                %Same process for right image as left image
+                if IR
+                    rootPixelsR = zeros([1,2]);
+
+                    pY = rootZoneYMinR;
+                    pZ = 1;
+                    rR = 0;                
+                    while pZ <= Zpixels_radiusR
+                        while pY <= rootZoneYMaxR
+
+                            currPixVal = croppedImageR(pZ, pY);
+
+                            if rootZoneLogicR(pZ,pY) && currPixVal(1) <= threshold
+                                    rR = rR+1;
+                                    rootPixelsR(rR,1) = pY;
+                                    rootPixelsR(rR,2) = pZ;
+                            end
+                            pY = pY+1;
+                        end
+
+                        pZ = pZ +1;
+                        pY = rootZoneYMinR;
+                    end
+                    
+                    binaryImageR = uint8(zeros(size(croppedImageR)));
+                    
+                    i = 1;
+                    while i <= size(rootPixelsR,1)
+                        if rootPixelsR == [0,0]
+                            %disp('***No root pixels fit within this threshold***')
+                        else
+                            binaryImageR(rootPixelsR(i,2),rootPixelsR(i,1)) = uint8(255);
+                        end
+                        i = i+1;
+                    end     
+                    
+                    if rootPixelsR == [0,0]
+                        plantThreshR(thresh,p,1) = 0;
+                        plantThreshR(thresh,p,2) = 0;
+                    else
+                        plantThreshR(thresh,p,1) = size(rootPixelsR,1);
+                        plantThreshR(thresh,p,2) = rR*pixelAreaR(p,1)*10000;
+                    end
+                    plantThreshR(thresh,p,3) = (plantThreshR(thresh,p,2)/(searchArea*10000));      
+                else
+                    i = 1;
+                    while i <= 3
+                        plantThreshR(thresh,p,i) = 0;
+                        i=i+1;
+                    end                    
+                end
+                
+                %Same process for combined image as left image and right image
+                if IC
+                    rootPixelsC = zeros([1,2]);
+
+                    pY = rootZoneYMinC;
+                    pZ = 1;
+                    rC = 0;                
+                    while pZ <= Zpixels_radiusC
+                        while pY <= rootZoneYMaxC
+
+                            currPixVal = croppedImageC(pZ, pY);
+
+                            if rootZoneLogicC(pZ,pY) && currPixVal(1) <= threshold
+                                    rC = rC+1;
+                                    rootPixelsC(rC,1) = pY;
+                                    rootPixelsC(rC,2) = pZ;
+                            end
+                            pY = pY+1;
+                        end
+
+                        pZ = pZ +1;
+                        pY = rootZoneYMinC;
+                    end 
+                    
+                    binaryImageC = uint8(zeros(size(croppedImageC)));
+
+                    i = 1;
+                    while i <= size(rootPixelsC,1)
+                        if rootPixelsC == [0,0]
+                            %disp('***No root pixels fit within this threshold***')
+                        else
+                            binaryImageC(rootPixelsC(i,2),rootPixelsC(i,1)) = uint8(255);
+                        end
+                        i = i+1;
+                    end        
+                    
+                    if rootPixelsC == [0,0]
+                        plantThreshC(thresh,p,1) = 0;
+                        plantThreshC(thresh,p,2) = 0;
+                    else
+                        plantThreshC(thresh,p,1) = size(rootPixelsC,1);
+                        plantThreshC(thresh,p,2) = rC*pixelAreaC(p,1)*10000;
+                    end
+                    plantThreshC(thresh,p,3) = (plantThreshC(thresh,p,2)/(searchArea*10000)); 
+                else
+                    i = 1;
+                    while i <= 3
+                        plantThreshC(thresh,p,i) = 0;
+                        i=i+1;                        
+                    end
+                end
+
+                thresh = thresh + 1;
+            end %Move onto next threshold value, stay with current plant
+    
+            
+        %Find best-fit area ratio to match biomass ratio
+            %Find the value with the minumum difference
+            %Save ratio diff. as temporary value
+            %Save threshold into array with best threshold for each plant
+        if IL
+            [bestValL,bestThreshL(p)] = min(abs(plantThreshL(:,p,3)-biomassRatio(p)));
+        else
+            bestValL=0;
+            bestThreshL(p) = 0;
+        end
+        
+        %Do the same for the right image
+        if IR
+            [bestValR,bestThreshR(p)] = min(abs(plantThreshR(:,p,3)-biomassRatio(p)));
+        else
+            bestValR=0;
+            bestThreshR(p) = 0;            
+        end
+        
+        %Do the same for the combined image
+        if IC
+            [bestValC,bestThreshC(p)] = min(abs(plantThreshC(:,p,3)-biomassRatio(p)));
+        else
+            bestValC=0;
+            bestThreshC(p) = 0;            
+        end
+        
+        %fprintf('Best Threshold for plant %s is: %d\n', currentPlant,bestThresh(p))
+        %fprintf('Min Distance: %0.3f\n',bestVal)   
+    end %All this only runs if cultivar is blue
+p = p+1; %Move onto next plant
+end 
+fclose('all'); %close files that were opened at the start of the script
+
+%Export Data
+p = 1; %start again iterating through each plant to export
+while p <= length(biomassRatio)
+    %Create only the temporary variables needed for export
+    rootFreshWt=plantLocs{16}(p,1);
+    Ring =      string(plantLocs{2}(p,1));
+    Plot =      string(plantLocs{3}(p,1));
+    Cult =      string(plantLocs{5}(p,1));
+    Row =       plantLocs{6}(p,1);
+    Plant =     plantLocs{7}(p,1);
+    PlantID =   string(plantLocs{8}(p,1));
+    
+    %Quality Control: 0 cannot be read in array, so sets to 1 by default
+        %This just allows script to skip null values without error
+    if bestThreshL(p) == 0
+       bestThreshTempL = 1; 
+    else
+        bestThreshTempL = bestThreshL(p);
+    end
+    
+    %Same for right image values
+    if bestThreshR(p) == 0
+       bestThreshTempR = 1; 
+    else
+        bestThreshTempR = bestThreshR(p);
+    end
+    
+    %Same for combined image values
+    if bestThreshC(p) == 0
+       bestThreshTempC = 1; 
+    else
+        bestThreshTempC = bestThreshC(p);
+    end
+    
+    %Create a cell array to export only most important data (for left image)
+    exportCellL{p,1} = p; %Plant No
+    exportCellL{p,2} = strcat(Ring,Plot); %Ring/Plot
+    exportCellL{p,3} = Cult;
+    exportCellL{p,4} = Row;
+    exportCellL{p,5} = Plant;
+    exportCellL{p,6} = PlantID;
+    exportCellL{p,7} = rootFreshWt; %rootFreshWt
+    exportCellL{p,8} = biomassRatio(p); %BiomassRatio
+    exportCellL{p,9} = plantThreshL(bestThreshTempL,p,3); %Best Fit Ratio
+    exportCellL{p,10} = bestThreshTempL*incVal; %Threshold
+    exportCellL{p,11} = plantThreshL(bestThreshTempL,p,1);%Number of Pixels
+    exportCellL{p,12} = plantThreshL(bestThreshTempL,p,2); %Area of Pizels_cm^2
+
+    %Create a cell array to export only most important data (for right image)
+    exportCellR{p,1} = p; %Plant No
+    exportCellR{p,2} = strcat(Ring,Plot); %Ring/Plot
+    exportCellR{p,3} = Cult;
+    exportCellR{p,4} = Row;
+    exportCellR{p,5} = Plant;
+    exportCellR{p,6} = PlantID;
+    exportCellR{p,7} = rootFreshWt; %rootFreshWt
+    exportCellR{p,8} = biomassRatio(p); %BiomassRatio
+    exportCellR{p,9} = plantThreshR(bestThreshTempR,p,3); %Best Fit Ratio
+    exportCellR{p,10} = bestThreshTempR*incVal; %Threshold
+    exportCellR{p,11} = plantThreshR(bestThreshTempR,p,1);%Number of Pixels
+    exportCellR{p,12} = plantThreshR(bestThreshTempR,p,2); %Area of Pizels_cm^2
+   
+    %Create a cell array to export only most important data (for combined image)    
+    exportCellC{p,1} = p; %Plant No
+    exportCellC{p,2} = strcat(Ring,Plot); %Ring/Plot
+    exportCellC{p,3} = Cult;
+    exportCellC{p,4} = Row;
+    exportCellC{p,5} = Plant;
+    exportCellC{p,6} = PlantID;
+    exportCellC{p,7} = rootFreshWt; %rootFreshWt
+    exportCellC{p,8} = biomassRatio(p); %BiomassRatio
+    exportCellC{p,9} = plantThreshC(bestThreshTempC,p,3); %Best Fit Ratio
+    exportCellC{p,10} = bestThreshTempC*incVal; %Threshold
+    exportCellC{p,11} = plantThreshC(bestThreshTempC,p,1);%Number of Pixels
+    exportCellC{p,12} = plantThreshC(bestThreshTempC,p,2); %Area of Pizels_cm^2
+    p = p+1;%move onto next plant
+end
+
+%Convert cell arrays to a table (for easy export)
+outputTableL = cell2table(exportCellL, 'VariableNames',{'PlantNo', 'Plot', 'Cultivar', 'PlantRow','PlantLoc','PlantID','Biomass_g','Biomass_Ratio', 'Best_Fit_Ratio','Threshold', 'No_of_Pixels','Area_of_Pixels_cm2'});
+outputTableR = cell2table(exportCellR, 'VariableNames',{'PlantNo', 'Plot', 'Cultivar', 'PlantRow','PlantLoc','PlantID','Biomass_g','Biomass_Ratio', 'Best_Fit_Ratio','Threshold', 'No_of_Pixels','Area_of_Pixels_cm2'});
+outputTableC = cell2table(exportCellC, 'VariableNames',{'PlantNo', 'Plot', 'Cultivar', 'PlantRow','PlantLoc','PlantID','Biomass_g','Biomass_Ratio', 'Best_Fit_Ratio','Threshold', 'No_of_Pixels','Area_of_Pixels_cm2'});
+
+%Convert arrays to table for easy export (left image):
+    %number of pixels for each plant & threshold
+    %pixels areas for each plant & threshold
+    %root ratio for each plant % threshold
+outputRootPixelsL = array2table(plantThreshL(:,:,1));
+outputRootAreasL = array2table(plantThreshL(:,:,2));
+outputRootRatiosL = array2table(plantThreshL(:,:,3));
+
+%Convert arrays to table for easy export (right image)
+outputRootPixelsR = array2table(plantThreshR(:,:,1));
+outputRootAreasR = array2table(plantThreshR(:,:,2));
+outputRootRatiosR = array2table(plantThreshR(:,:,3));
+
+%Convert arrays to table for easy export (combined image)
+outputRootPixelsC = array2table(plantThreshC(:,:,1));
+outputRootAreasC = array2table(plantThreshC(:,:,2));
+outputRootRatiosC = array2table(plantThreshC(:,:,3));
+
+%Write all the exported files:
+writetable(outputTableL,strcat(outputFilepath,'PlantOptimizedThresholds_Left.txt'));
+writetable(outputTableR,strcat(outputFilepath,'PlantOptimizedThresholds_Right.txt'));
+writetable(outputTableC,strcat(outputFilepath,'PlantOptimizedThresholds_Combined.txt'));
+
+writetable(outputRootPixelsL,strcat(outputFilepath,'rootPixels_AllPlants_AllThresholds_Left.txt'));
+writetable(outputRootPixelsR,strcat(outputFilepath,'rootPixels_AllPlants_AllThresholds_Right.txt'));
+writetable(outputRootPixelsC,strcat(outputFilepath,'rootPixels_AllPlants_AllThresholds_Combined.txt'));
+
+writetable(outputRootAreasL,strcat(outputFilepath,'rootAreas_AllPlants_AllThresholds_Left.txt'));
+writetable(outputRootAreasR,strcat(outputFilepath,'rootAreas_AllPlants_AllThresholds_Right.txt'));
+writetable(outputRootAreasC,strcat(outputFilepath,'rootAreas_AllPlants_AllThresholds_Combined.txt'));
+
+writetable(outputRootRatiosL,strcat(outputFilepath,'rootRatios_AllPlants_AllThresholds_Left.txt'));
+writetable(outputRootRatiosR,strcat(outputFilepath,'rootRatios_AllPlants_AllThresholds_Right.txt'));
+writetable(outputRootRatiosC,strcat(outputFilepath,'rootRatios_AllPlants_AllThresholds_Combine.txt'));
+
